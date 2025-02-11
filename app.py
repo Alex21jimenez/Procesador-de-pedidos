@@ -28,26 +28,39 @@ def init_db():
 init_db()
 
 def procesar_archivo(file):
-    df = pd.read_excel(file, dtype=str)
-    columnas_interes = ["LIN03", "REF02", "FST01", "FST04"]
-    df_limpio = df[columnas_interes].copy()
-    df_limpio["FST04"] = pd.to_datetime(df_limpio["FST04"], format="%Y%m%d")
-    df_limpio["Semana"] = df_limpio["FST04"].dt.to_period("W").astype(str)
-    
-    df_pivot = df_limpio.pivot_table(index=["LIN03", "REF02"],
-                                     columns="Semana",
-                                     values="FST01",
-                                     aggfunc="sum",
-                                     fill_value=0)
-    df_pivot.reset_index(inplace=True)
-    semanas_numeros = [str(pd.to_datetime(semana.split("/")[0]).weekofyear) for semana in df_pivot.columns[2:]]
-    
-    df_pivot.columns = ["Número de Parte", "Nombre de la Parte"] + semanas_numeros
-    
-    semanas_global.clear()
-    semanas_global.extend(semanas_numeros)
-    
-    return df_pivot.to_dict(orient='records')
+    try:
+        df = pd.read_excel(file, dtype=str)
+        columnas_interes = ["LIN03", "REF02", "FST01", "FST04"]
+        
+        if not set(columnas_interes).issubset(df.columns):
+            raise ValueError("Las columnas esperadas no están presentes en el archivo.")
+        
+        df_limpio = df[columnas_interes].copy()
+        df_limpio["FST04"] = pd.to_datetime(df_limpio["FST04"], format="%Y%m%d", errors='coerce')
+        
+        # Manejo de valores inválidos
+        df_limpio = df_limpio.dropna(subset=["FST04"])
+        
+        df_limpio["Semana"] = df_limpio["FST04"].dt.strftime("%U")  # Semana del año en números
+        
+        df_pivot = df_limpio.pivot_table(index=["LIN03", "REF02"],
+                                         columns="Semana",
+                                         values="FST01",
+                                         aggfunc="sum",
+                                         fill_value=0)
+        df_pivot.reset_index(inplace=True)
+        
+        semanas_numeros = list(df_pivot.columns[2:])
+        df_pivot.columns = ["Número de Parte", "Nombre de la Parte"] + semanas_numeros
+
+        semanas_global.clear()
+        semanas_global.extend(semanas_numeros)
+
+        return df_pivot.to_dict(orient='records')
+
+    except Exception as e:
+        print("Error procesando archivo:", e)
+        return []
 
 @app.route('/')
 def index():
@@ -59,10 +72,19 @@ def index():
     pedidos = cursor.fetchall()
     conn.close()
 
-    data_global = [
-        {"Número de Parte": row[0], "Nombre de la Parte": row[1], "Semana": row[2], "Cantidad": row[3]} 
-        for row in pedidos
-    ]
+    data_global = []
+    pedidos_dict = {}
+
+    for row in pedidos:
+        numero_parte, nombre_parte, semana, cantidad = row
+        if numero_parte not in pedidos_dict:
+            pedidos_dict[numero_parte] = {
+                "Número de Parte": numero_parte,
+                "Nombre de la Parte": nombre_parte
+            }
+        pedidos_dict[numero_parte][semana] = cantidad
+
+    data_global = list(pedidos_dict.values())
 
     return render_template('table.html', data=data_global, header="FASO - Procesador de Pedidos", semanas=semanas_global, logo_url="/static/logo.jpg")
 
@@ -78,9 +100,12 @@ def upload():
     for file in files:
         try:
             datos_procesados = procesar_archivo(file)
+
+            if not datos_procesados:
+                continue  # Si hubo un error en el archivo, lo omitimos
+
             data_global.extend(datos_procesados)
 
-            # Insertar datos en la base de datos
             for pedido in datos_procesados:
                 for semana, cantidad in pedido.items():
                     if semana not in ["Número de Parte", "Nombre de la Parte"]:
@@ -90,8 +115,9 @@ def upload():
                         """, (pedido["Número de Parte"], pedido["Nombre de la Parte"], semana, cantidad))
         except Exception as e:
             print("Error procesando archivo:", e)
+            conn.rollback()
             conn.close()
-            return str(e), 400  # Retornar error
+            return str(e), 400
     
     conn.commit()
     conn.close()
@@ -100,6 +126,4 @@ def upload():
 
 if __name__ == '__main__':
     app.run(debug=True)
-
-
 
