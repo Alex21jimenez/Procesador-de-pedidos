@@ -18,7 +18,8 @@ def init_db():
             numero_parte TEXT,
             nombre_parte TEXT,
             semana TEXT,
-            cantidad INTEGER
+            cantidad INTEGER,
+            almacen TEXT
         )
     """)
     conn.commit()
@@ -27,7 +28,7 @@ def init_db():
 # Llamamos a la función para crear la base de datos si no existe
 init_db()
 
-def procesar_archivo(file):
+def procesar_archivo(file, almacen):
     df = pd.read_excel(file, dtype=str)
     columnas_interes = ["LIN03", "REF02", "FST01", "FST04"]
     df_limpio = df[columnas_interes].copy()
@@ -36,21 +37,9 @@ def procesar_archivo(file):
     df_limpio["Semana"] = df_limpio["FST04"].dt.strftime("%U")  # Número de la semana
     
     df_limpio["FST01"] = pd.to_numeric(df_limpio["FST01"], errors='coerce').fillna(0).astype(int)
+    df_limpio["Almacén"] = almacen
     
-    df_pivot = df_limpio.pivot_table(index=["LIN03", "REF02"],
-                                     columns="Semana",
-                                     values="FST01",
-                                     aggfunc="sum",
-                                     fill_value=0)
-    df_pivot.reset_index(inplace=True)
-    semanas_numeros = list(df_pivot.columns[2:])
-    
-    df_pivot.columns = ["Número de Parte", "Nombre de la Parte"] + semanas_numeros
-    
-    semanas_global.clear()
-    semanas_global.extend(semanas_numeros)
-    
-    return df_pivot.to_dict(orient='records')
+    return df_limpio
 
 @app.route('/')
 def index():
@@ -58,42 +47,52 @@ def index():
 
     conn = sqlite3.connect("pedidos.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT numero_parte, nombre_parte, semana, cantidad FROM pedidos")
+    cursor.execute("SELECT numero_parte, nombre_parte, semana, cantidad, almacen FROM pedidos")
     pedidos = cursor.fetchall()
     conn.close()
 
-    data_global = []
+    data_dict = {}
+    almacenes = set()
+    
     for row in pedidos:
-        pedido_dict = next((p for p in data_global if p["Número de Parte"] == row[0]), None)
-        if not pedido_dict:
-            pedido_dict = {"Número de Parte": row[0], "Nombre de la Parte": row[1]}
-            data_global.append(pedido_dict)
-        pedido_dict[row[2]] = row[3]
-
-    return render_template('table.html', data=data_global, header="FASO - Procesador de Pedidos", semanas=semanas_global, logo_url="/static/logo.jpg")
+        numero_parte, nombre_parte, semana, cantidad, almacen = row
+        almacenes.add(almacen)
+        if numero_parte not in data_dict:
+            data_dict[numero_parte] = {"Número de Parte": numero_parte, "Nombre de la Parte": nombre_parte, "Total CDR": 0, "Total APRC": 0, "Total Renault": 0}
+        
+        if semana not in data_dict[numero_parte]:
+            data_dict[numero_parte][semana] = {}
+        data_dict[numero_parte][semana][almacen] = cantidad
+        
+        # Sumar a la columna de total por almacén
+        if almacen == "CDR":
+            data_dict[numero_parte]["Total CDR"] += cantidad
+        elif almacen == "APRC":
+            data_dict[numero_parte]["Total APRC"] += cantidad
+        elif almacen == "Renault":
+            data_dict[numero_parte]["Total Renault"] += cantidad
+    
+    data_global = list(data_dict.values())
+    return render_template('table.html', data=data_global, header="FASO - Procesador de Pedidos", semanas=semanas_global, logo_url="/static/logo.jpg", almacenes=list(almacenes))
 
 @app.route('/upload', methods=['POST'])
 def upload():
     global data_global
     files = request.files.getlist('files')
-    
     conn = sqlite3.connect("pedidos.db")
     cursor = conn.cursor()
     cursor.execute("DELETE FROM pedidos")  # Esto borra los registros anteriores
     
     for file in files:
+        almacen = request.form.get("almacen", "Desconocido")  # Se espera que el formulario indique el almacén
         try:
-            datos_procesados = procesar_archivo(file)
-            
-            for pedido in datos_procesados:
-                for semana, cantidad in pedido.items():
-                    if semana not in ["Número de Parte", "Nombre de la Parte"]:
-                        cantidad = int(cantidad) if str(cantidad).isdigit() else 0  # Validación de enteros
-                        cantidad = min(cantidad, 2147483647)  # Límite de INTEGER en SQLite
-                        cursor.execute("""
-                            INSERT INTO pedidos (numero_parte, nombre_parte, semana, cantidad) 
-                            VALUES (?, ?, ?, ?)
-                        """, (pedido["Número de Parte"], pedido["Nombre de la Parte"], semana, cantidad))
+            datos_procesados = procesar_archivo(file, almacen)
+            for _, row in datos_procesados.iterrows():
+                cantidad = min(row["FST01"], 2147483647)  # Límite de INTEGER en SQLite
+                cursor.execute(
+                    "INSERT INTO pedidos (numero_parte, nombre_parte, semana, cantidad, almacen) VALUES (?, ?, ?, ?, ?)",
+                    (row["LIN03"], row["REF02"], row["Semana"], cantidad, row["Almacén"])
+                )
         except Exception as e:
             print("Error procesando archivo:", e)
             conn.close()
@@ -106,5 +105,4 @@ def upload():
 
 if __name__ == '__main__':
     app.run(debug=True)
-
 
