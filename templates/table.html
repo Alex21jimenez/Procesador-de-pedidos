@@ -7,59 +7,58 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
-
     <h1>{{ header }}</h1>
-
+    
     <table border="1">
         <thead>
-            <tr>
-                <th rowspan="2">Número de Parte</th>
-                <th rowspan="2">Nombre de la Parte</th>
+            <tr style="background-color: #4CAF50; color: white;">
+                <th>Número de Parte</th>
+                <th>Nombre de la Parte</th>
+                <th>Semana Total CDR</th>
+                <th>Semana Total APRC</th>
+                <th>Semana Total Renault</th>
                 {% for semana in semanas %}
-                    <th colspan="3">{{ semana }}</th>
-                {% endfor %}
-                <th rowspan="2">Total CDR</th>
-                <th rowspan="2">Total APRC</th>
-                <th rowspan="2">Total Renault</th>
-            </tr>
-            <tr>
-                {% for semana in semanas %}
-                    <th>CDR</th>
-                    <th>APRC</th>
-                    <th>Renault</th>
+                    <th>Semana {{ semana }}</th>
                 {% endfor %}
             </tr>
         </thead>
         <tbody>
-            {% for row in data %}
+            {% for item in data %}
                 <tr>
-                    <td>{{ row["Número de Parte"] }}</td>
-                    <td>{{ row["Nombre de la Parte"] }}</td>
+                    <td>{{ item["Número de Parte"] }}</td>
+                    <td>{{ item["Nombre de la Parte"] }}</td>
+                    <td>{{ item["Total CDR"] }}</td>
+                    <td>{{ item["Total APRC"] }}</td>
+                    <td>{{ item["Total Renault"] }}</td>
                     {% for semana in semanas %}
-                        <td>{{ row[semana]["CDR"] if "CDR" in row[semana] else 0 }}</td>
-                        <td>{{ row[semana]["APRC"] if "APRC" in row[semana] else 0 }}</td>
-                        <td>{{ row[semana]["Renault"] if "Renault" in row[semana] else 0 }}</td>
+                        <td>
+                            {% if semana in item %}
+                                {% for almacen, cantidad in item[semana].items() %}
+                                    {{ almacen }}: {{ cantidad }}<br>
+                                {% endfor %}
+                            {% else %}
+                                0
+                            {% endif %}
+                        </td>
                     {% endfor %}
-                    <td>{{ row["Total CDR"] }}</td>
-                    <td>{{ row["Total APRC"] }}</td>
-                    <td>{{ row["Total Renault"] }}</td>
                 </tr>
             {% endfor %}
         </tbody>
     </table>
 
+    <h2>Subir nuevos archivos de pedidos</h2>
     <form action="/upload" method="post" enctype="multipart/form-data">
-        <h3>Subir nuevos archivos de pedidos</h3>
         <label for="almacen">Seleccionar Almacén:</label>
         <select name="almacen" id="almacen">
-            <option value="CDR">CDR (Toluca)</option>
-            <option value="APRC">APRC (Aguascalientes)</option>
+            <option value="CDR">CDR</option>
+            <option value="APRC">APRC</option>
             <option value="Renault">Renault</option>
         </select>
+        <br><br>
         <input type="file" name="files" multiple required>
+        <br><br>
         <button type="submit">Cargar Pedidos</button>
     </form>
-
 </body>
 </html>
 
