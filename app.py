@@ -1,6 +1,5 @@
 import pandas as pd
 import sqlite3
-import os
 from flask import Flask, render_template, request
 
 app = Flask(__name__)
@@ -19,7 +18,8 @@ def init_db():
             nombre_parte TEXT,
             semana TEXT,
             cantidad INTEGER,
-            almacen TEXT
+            almacen TEXT,
+            UNIQUE(numero_parte, semana, almacen) ON CONFLICT REPLACE
         )
     """)
     conn.commit()
@@ -32,11 +32,18 @@ def procesar_archivo(file, almacen):
     df = pd.read_excel(file, dtype=str)
     columnas_interes = ["LIN03", "REF02", "FST01", "FST04"]
     df_limpio = df[columnas_interes].copy()
+
+    # Convertir la fecha a un formato correcto
     df_limpio["FST04"] = pd.to_datetime(df_limpio["FST04"], format="%Y%m%d", errors='coerce')
-    df_limpio.dropna(subset=["FST04"], inplace=True)  # Elimina fechas inválidas
-    df_limpio["Semana"] = df_limpio["FST04"].dt.strftime("%U")  # Número de la semana
+    df_limpio.dropna(subset=["FST04"], inplace=True)
     
+    # Extraer el número de semana
+    df_limpio["Semana"] = df_limpio["FST04"].dt.strftime("%U")
+
+    # Convertir cantidad a entero con límite máximo para SQLite
     df_limpio["FST01"] = pd.to_numeric(df_limpio["FST01"], errors='coerce').fillna(0).astype(int)
+    df_limpio["FST01"] = df_limpio["FST01"].clip(0, 2147483647)
+
     df_limpio["Almacén"] = almacen
     
     return df_limpio
@@ -53,18 +60,25 @@ def index():
 
     data_dict = {}
     almacenes = set()
+    semanas = set()
     
     for row in pedidos:
         numero_parte, nombre_parte, semana, cantidad, almacen = row
         almacenes.add(almacen)
+        semanas.add(semana)
         if numero_parte not in data_dict:
-            data_dict[numero_parte] = {"Número de Parte": numero_parte, "Nombre de la Parte": nombre_parte, "Total CDR": 0, "Total APRC": 0, "Total Renault": 0}
+            data_dict[numero_parte] = {
+                "Número de Parte": numero_parte,
+                "Nombre de la Parte": nombre_parte,
+                "Total CDR": 0, "Total APRC": 0, "Total Renault": 0
+            }
         
         if semana not in data_dict[numero_parte]:
-            data_dict[numero_parte][semana] = {}
-        data_dict[numero_parte][semana][almacen] = cantidad
-        
-        # Sumar a la columna de total por almacén
+            data_dict[numero_parte][semana] = {"CDR": 0, "APRC": 0, "Renault": 0}
+
+        data_dict[numero_parte][semana][almacen] += cantidad
+
+        # Sumar a la columna total por almacén
         if almacen == "CDR":
             data_dict[numero_parte]["Total CDR"] += cantidad
         elif almacen == "APRC":
@@ -72,8 +86,10 @@ def index():
         elif almacen == "Renault":
             data_dict[numero_parte]["Total Renault"] += cantidad
     
+    semanas_global[:] = sorted(semanas)
     data_global = list(data_dict.values())
-    return render_template('table.html', data=data_global, header="FASO - Procesador de Pedidos", semanas=semanas_global, logo_url="/static/logo.jpg", almacenes=list(almacenes))
+
+    return render_template('table.html', data=data_global, header="FASO - Procesador de Pedidos", semanas=semanas_global)
 
 @app.route('/upload', methods=['POST'])
 def upload():
@@ -81,28 +97,25 @@ def upload():
     files = request.files.getlist('files')
     conn = sqlite3.connect("pedidos.db")
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM pedidos")  # Esto borra los registros anteriores
-    
+
     for file in files:
-        almacen = request.form.get("almacen", "Desconocido")  # Se espera que el formulario indique el almacén
+        almacen = request.form.get("almacen", "Desconocido")
         try:
             datos_procesados = procesar_archivo(file, almacen)
             for _, row in datos_procesados.iterrows():
-                cantidad = min(row["FST01"], 2147483647)  # Límite de INTEGER en SQLite
                 cursor.execute(
-                    "INSERT INTO pedidos (numero_parte, nombre_parte, semana, cantidad, almacen) VALUES (?, ?, ?, ?, ?)",
-                    (row["LIN03"], row["REF02"], row["Semana"], cantidad, row["Almacén"])
+                    "INSERT OR REPLACE INTO pedidos (numero_parte, nombre_parte, semana, cantidad, almacen) VALUES (?, ?, ?, ?, ?)",
+                    (row["LIN03"], row["REF02"], row["Semana"], row["FST01"], row["Almacén"])
                 )
         except Exception as e:
             print("Error procesando archivo:", e)
             conn.close()
-            return str(e), 400  # Retornar error
-    
+            return str(e), 400
+
     conn.commit()
     conn.close()
     
-    return render_template('table.html', data=data_global, header="FASO - Procesador de Pedidos", semanas=semanas_global, logo_url="/static/logo.jpg")
+    return render_template('table.html', data=data_global, header="FASO - Procesador de Pedidos", semanas=semanas_global)
 
 if __name__ == '__main__':
     app.run(debug=True)
-
