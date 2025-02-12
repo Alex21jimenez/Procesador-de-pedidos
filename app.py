@@ -52,24 +52,25 @@ def index():
     conn.close()
 
     data_dict = {}
-    almacenes = set()
+    almacenes = {"CDR": 0, "APRC": 0, "Renault": 0}
+    semanas_global.clear()
     
     for row in pedidos:
         numero_parte, nombre_parte, semana, cantidad, almacen = row
-        almacenes.add(almacen)
         if numero_parte not in data_dict:
             data_dict[numero_parte] = {
                 "Número de Parte": numero_parte,
                 "Nombre de la Parte": nombre_parte,
                 "Total CDR": 0,
                 "Total APRC": 0,
-                "Total Renault": 0
+                "Total Renault": 0,
+                "Semanas": {}
             }
         
-        if semana not in data_dict[numero_parte]:
-            data_dict[numero_parte][semana] = {"CDR": 0, "APRC": 0, "Renault": 0}
+        if semana not in data_dict[numero_parte]["Semanas"]:
+            data_dict[numero_parte]["Semanas"][semana] = {"CDR": 0, "APRC": 0, "Renault": 0}
         
-        data_dict[numero_parte][semana][almacen] += cantidad
+        data_dict[numero_parte]["Semanas"][semana][almacen] += cantidad
         
         # Sumar a la columna de total por almacén
         if almacen == "CDR":
@@ -78,20 +79,24 @@ def index():
             data_dict[numero_parte]["Total APRC"] += cantidad
         elif almacen == "Renault":
             data_dict[numero_parte]["Total Renault"] += cantidad
+        
+        if semana not in semanas_global:
+            semanas_global.append(semana)
     
+    semanas_global.sort()
     data_global = list(data_dict.values())
-    return render_template('table.html', data=data_global, header="FASO - Procesador de Pedidos", semanas=semanas_global, logo_url="/static/logo.jpg", almacenes=list(almacenes))
+    return render_template('table.html', data=data_global, header="FASO - Procesador de Pedidos", semanas=semanas_global, logo_url="/static/logo.jpg", almacenes=list(almacenes.keys()))
 
 @app.route('/upload', methods=['POST'])
 def upload():
     global data_global
     files = request.files.getlist('files')
+    almacen = request.form.get("almacen", "Desconocido")  # Se espera que el usuario seleccione el almacén
     conn = sqlite3.connect("pedidos.db")
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM pedidos")  # Esto borra los registros anteriores
+    cursor.execute("DELETE FROM pedidos WHERE almacen = ?", (almacen,))  # Solo borra registros del mismo almacén
     
     for file in files:
-        almacen = request.form.get("almacen", "Desconocido")  # Se espera que el formulario indique el almacén
         try:
             datos_procesados = procesar_archivo(file, almacen)
             for _, row in datos_procesados.iterrows():
@@ -108,7 +113,7 @@ def upload():
     conn.commit()
     conn.close()
     
-    return render_template('table.html', data=data_global, header="FASO - Procesador de Pedidos", semanas=semanas_global, logo_url="/static/logo.jpg")
+    return index()
 
 if __name__ == '__main__':
     app.run(debug=True)
