@@ -4,100 +4,63 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ header }}</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f4f4f4;
-            margin: 20px;
-            text-align: center;
-        }
-        h1 {
-            color: #333;
-        }
-        table {
-            width: 90%;
-            margin: 20px auto;
-            border-collapse: collapse;
-            background: white;
-            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
-        }
-        th, td {
-            border: 1px solid #ddd;
-            padding: 10px;
-            text-align: center;
-        }
-        th {
-            background-color: #4CAF50;
-            color: white;
-        }
-        .month-header {
-            background-color: #2E7D32;
-            color: white;
-            font-weight: bold;
-        }
-        .upload-section {
-            margin-top: 30px;
-            padding: 20px;
-            background: white;
-            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
-            display: inline-block;
-        }
-        button {
-            background-color: #4CAF50;
-            color: white;
-            padding: 10px 15px;
-            border: none;
-            cursor: pointer;
-            font-size: 16px;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
 
     <h1>{{ header }}</h1>
 
-    {% if data %}
-        <table>
-            <tr class="month-header">
-                <th colspan="2">Mes</th>
-                {% for mes in meses %}
-                    <th>{{ mes }}</th>
+    <table border="1">
+        <thead>
+            <tr>
+                <th rowspan="2">Número de Parte</th>
+                <th rowspan="2">Nombre de la Parte</th>
+                {% for semana in semanas %}
+                    <th colspan="3">{{ semana }}</th>
                 {% endfor %}
+                <th rowspan="2">Total CDR</th>
+                <th rowspan="2">Total APRC</th>
+                <th rowspan="2">Total Renault</th>
             </tr>
             <tr>
-                <th>Número de Parte</th>
-                <th>Nombre de la Parte</th>
-                {% for semana in data[0].keys() if semana not in ['Número de Parte', 'Nombre de la Parte'] %}
-                    <th>Semana {{ semana }}</th>
+                {% for semana in semanas %}
+                    <th>CDR</th>
+                    <th>APRC</th>
+                    <th>Renault</th>
                 {% endfor %}
             </tr>
+        </thead>
+        <tbody>
             {% for row in data %}
-            <tr>
-                <td>{{ row['Número de Parte'] }}</td>
-                <td>{{ row['Nombre de la Parte'] }}</td>
-                {% for semana in row.keys() if semana not in ['Número de Parte', 'Nombre de la Parte'] %}
-                    <td>{{ row[semana] }}</td>
-                {% endfor %}
-            </tr>
+                <tr>
+                    <td>{{ row["Número de Parte"] }}</td>
+                    <td>{{ row["Nombre de la Parte"] }}</td>
+                    {% for semana in semanas %}
+                        <td>{{ row[semana]["CDR"] if "CDR" in row[semana] else 0 }}</td>
+                        <td>{{ row[semana]["APRC"] if "APRC" in row[semana] else 0 }}</td>
+                        <td>{{ row[semana]["Renault"] if "Renault" in row[semana] else 0 }}</td>
+                    {% endfor %}
+                    <td>{{ row["Total CDR"] }}</td>
+                    <td>{{ row["Total APRC"] }}</td>
+                    <td>{{ row["Total Renault"] }}</td>
+                </tr>
             {% endfor %}
-        </table>
-    {% else %}
-        <p>No hay pedidos cargados. Por favor, sube un archivo.</p>
-    {% endif %}
+        </tbody>
+    </table>
 
-    <div class="upload-section">
-        <h2>Subir nuevos archivos de pedidos</h2>
-        <form action="/upload" method="post" enctype="multipart/form-data">
-            <input type="file" name="files" multiple required>
-            <button type="submit">Cargar Pedidos</button>
-        </form>
-    </div>
+    <form action="/upload" method="post" enctype="multipart/form-data">
+        <h3>Subir nuevos archivos de pedidos</h3>
+        <label for="almacen">Seleccionar Almacén:</label>
+        <select name="almacen" id="almacen">
+            <option value="CDR">CDR (Toluca)</option>
+            <option value="APRC">APRC (Aguascalientes)</option>
+            <option value="Renault">Renault</option>
+        </select>
+        <input type="file" name="files" multiple required>
+        <button type="submit">Cargar Pedidos</button>
+    </form>
 
 </body>
 </html>
-
 
 
