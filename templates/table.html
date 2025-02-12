@@ -3,45 +3,68 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ header }}</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <title>FASO - Procesador de Pedidos</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid black;
+            padding: 8px;
+            text-align: center;
+        }
+        th {
+            background-color: green;
+            color: white;
+        }
+        .total-column {
+            font-weight: bold;
+            background-color: #f2f2f2;
+        }
+    </style>
 </head>
 <body>
     <h1>{{ header }}</h1>
-    
-    <table border="1">
+    <table>
         <thead>
-            <tr style="background-color: #4CAF50; color: white;">
+            <tr>
                 <th>Número de Parte</th>
                 <th>Nombre de la Parte</th>
-                <th>Semana Total CDR</th>
-                <th>Semana Total APRC</th>
-                <th>Semana Total Renault</th>
                 {% for semana in semanas %}
-                    <th>Semana {{ semana }}</th>
+                    <th colspan="3">Semana {{ semana }}</th>
                 {% endfor %}
+                <th class="total-column">Total CDR</th>
+                <th class="total-column">Total APRC</th>
+                <th class="total-column">Total Renault</th>
+            </tr>
+            <tr>
+                <th></th>
+                <th></th>
+                {% for semana in semanas %}
+                    <th>CDR</th>
+                    <th>APRC</th>
+                    <th>Renault</th>
+                {% endfor %}
+                <th class="total-column"></th>
+                <th class="total-column"></th>
+                <th class="total-column"></th>
             </tr>
         </thead>
         <tbody>
             {% for item in data %}
-                <tr>
-                    <td>{{ item["Número de Parte"] }}</td>
-                    <td>{{ item["Nombre de la Parte"] }}</td>
-                    <td>{{ item["Total CDR"] }}</td>
-                    <td>{{ item["Total APRC"] }}</td>
-                    <td>{{ item["Total Renault"] }}</td>
-                    {% for semana in semanas %}
-                        <td>
-                            {% if semana in item %}
-                                {% for almacen, cantidad in item[semana].items() %}
-                                    {{ almacen }}: {{ cantidad }}<br>
-                                {% endfor %}
-                            {% else %}
-                                0
-                            {% endif %}
-                        </td>
-                    {% endfor %}
-                </tr>
+            <tr>
+                <td>{{ item['Número de Parte'] }}</td>
+                <td>{{ item['Nombre de la Parte'] }}</td>
+                {% for semana in semanas %}
+                    <td>{{ item.get(semana, {}).get('CDR', 0) }}</td>
+                    <td>{{ item.get(semana, {}).get('APRC', 0) }}</td>
+                    <td>{{ item.get(semana, {}).get('Renault', 0) }}</td>
+                {% endfor %}
+                <td class="total-column">{{ item['Total CDR'] }}</td>
+                <td class="total-column">{{ item['Total APRC'] }}</td>
+                <td class="total-column">{{ item['Total Renault'] }}</td>
+            </tr>
             {% endfor %}
         </tbody>
     </table>
@@ -55,11 +78,9 @@
             <option value="Renault">Renault</option>
         </select>
         <br><br>
-        <input type="file" name="files" multiple required>
+        <input type="file" name="files" multiple>
         <br><br>
         <button type="submit">Cargar Pedidos</button>
     </form>
 </body>
 </html>
-
-
