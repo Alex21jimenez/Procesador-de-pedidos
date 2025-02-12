@@ -1,117 +1,85 @@
-import pandas as pd
+from flask import Flask, render_template, request, redirect, url_for
 import sqlite3
+import pandas as pd
 import os
-from flask import Flask, render_template, request
 
 app = Flask(__name__)
+DATABASE = "pedidos.db"
 
-data_global = []
-semanas_global = []
-
-# Inicializar la base de datos
-
+# Crear la base de datos y tabla si no existe
 def init_db():
-    conn = sqlite3.connect("pedidos.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS pedidos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            numero_parte TEXT,
-            nombre_parte TEXT,
-            semana TEXT,
-            cantidad INTEGER,
-            almacen TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(DATABASE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS pedidos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                numero_parte TEXT,
+                nombre_parte TEXT,
+                almacen TEXT,
+                semana INTEGER,
+                cantidad INTEGER
+            )
+        ''')
+        conn.commit()
 
 init_db()
 
-def procesar_archivo(file, almacen):
-    df = pd.read_excel(file, dtype=str)
-    columnas_interes = ["LIN03", "REF02", "FST01", "FST04"]
-    df_limpio = df[columnas_interes].copy()
-    df_limpio["FST04"] = pd.to_datetime(df_limpio["FST04"], format="%Y%m%d", errors='coerce')
-    df_limpio.dropna(subset=["FST04"], inplace=True)
-    df_limpio["Semana"] = df_limpio["FST04"].dt.strftime("%U")
-    df_limpio["FST01"] = pd.to_numeric(df_limpio["FST01"], errors='coerce').fillna(0).astype(int)
-    df_limpio["Almacén"] = almacen
-    return df_limpio
-
 @app.route('/')
 def index():
-    global data_global
-
-    conn = sqlite3.connect("pedidos.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT numero_parte, nombre_parte, semana, cantidad, almacen FROM pedidos")
-    pedidos = cursor.fetchall()
-    conn.close()
-
-    data_dict = {}
-    almacenes = set()
+    with sqlite3.connect(DATABASE) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT numero_parte, nombre_parte, almacen, semana, SUM(cantidad) FROM pedidos GROUP BY numero_parte, nombre_parte, almacen, semana")
+        pedidos = cursor.fetchall()
+    
+    data = {}
     semanas = set()
     
-    for row in pedidos:
-        numero_parte, nombre_parte, semana, cantidad, almacen = row
-        almacenes.add(almacen)
+    for pedido in pedidos:
+        numero_parte, nombre_parte, almacen, semana, cantidad = pedido
         semanas.add(semana)
         
-        if numero_parte not in data_dict:
-            data_dict[numero_parte] = {
+        if numero_parte not in data:
+            data[numero_parte] = {
                 "Número de Parte": numero_parte,
                 "Nombre de la Parte": nombre_parte,
-                "Total CDR": 0,
-                "Total APRC": 0,
-                "Total Renault": 0
+                "Total CDR": 0, "Total APRC": 0, "Total Renault": 0
             }
         
-        if semana not in data_dict[numero_parte]:
-            data_dict[numero_parte][semana] = {"CDR": 0, "APRC": 0, "Renault": 0}
+        if semana not in data[numero_parte]:
+            data[numero_parte][semana] = {"CDR": 0, "APRC": 0, "Renault": 0}
         
-        data_dict[numero_parte][semana][almacen] += cantidad
-        
-        if almacen == "CDR":
-            data_dict[numero_parte]["Total CDR"] += cantidad
-        elif almacen == "APRC":
-            data_dict[numero_parte]["Total APRC"] += cantidad
-        elif almacen == "Renault":
-            data_dict[numero_parte]["Total Renault"] += cantidad
+        data[numero_parte][semana][almacen] = cantidad
+        data[numero_parte][f"Total {almacen}"] += cantidad
     
-    semanas_global.clear()
-    semanas_global.extend(sorted(semanas, key=lambda x: int(x)))
-    
-    data_global = list(data_dict.values())
-    return render_template('table.html', data=data_global, header="FASO - Procesador de Pedidos", semanas=semanas_global, logo_url="/static/logo.jpg", almacenes=list(almacenes))
+    return render_template("table.html", header="FASO - Procesador de Pedidos", data=data.values(), semanas=sorted(semanas))
 
 @app.route('/upload', methods=['POST'])
 def upload():
-    global data_global
+    if 'files' not in request.files:
+        return redirect(request.url)
+    
     files = request.files.getlist('files')
-    conn = sqlite3.connect("pedidos.db")
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM pedidos")
+    almacen = request.form.get("almacen")
+
+    if almacen not in ["CDR", "APRC", "Renault"]:
+        return "Almacén no válido", 400
     
     for file in files:
-        almacen = request.form.get("almacen", "Desconocido")
-        try:
-            datos_procesados = procesar_archivo(file, almacen)
-            for _, row in datos_procesados.iterrows():
-                cantidad = min(row["FST01"], 2147483647)
+        if file.filename == '':
+            continue
+        
+        df = pd.read_excel(file, dtype={"Número de Parte": str})
+        
+        with sqlite3.connect(DATABASE) as conn:
+            cursor = conn.cursor()
+            for _, row in df.iterrows():
                 cursor.execute(
-                    "INSERT INTO pedidos (numero_parte, nombre_parte, semana, cantidad, almacen) VALUES (?, ?, ?, ?, ?)",
-                    (row["LIN03"], row["REF02"], row["Semana"], cantidad, row["Almacén"])
+                    "INSERT INTO pedidos (numero_parte, nombre_parte, almacen, semana, cantidad) VALUES (?, ?, ?, ?, ?)",
+                    (row["Número de Parte"], row["Nombre de la Parte"], almacen, row["Semana"], row["Cantidad"])
                 )
-        except Exception as e:
-            print("Error procesando archivo:", e)
-            conn.close()
-            return str(e), 400  
+            conn.commit()
     
-    conn.commit()
-    conn.close()
-    
-    return render_template('table.html', data=data_global, header="FASO - Procesador de Pedidos", semanas=semanas_global, logo_url="/static/logo.jpg")
+    return redirect(url_for("index"))
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(debug=True)
