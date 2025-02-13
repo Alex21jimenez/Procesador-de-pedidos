@@ -26,6 +26,7 @@
 </head>
 <body>
     <h1>{{ header }}</h1>
+    
     <table>
         <thead>
             <tr>
@@ -46,9 +47,9 @@
                 <td>{{ pedido['Nombre de la Parte'] }}</td>
                 {% for semana in semanas %}
                     <td>
-                        CDR: {{ pedido[semana]['CDR'] if semana in pedido else 0 }}<br>
-                        APRC: {{ pedido[semana]['APRC'] if semana in pedido else 0 }}<br>
-                        Renault: {{ pedido[semana]['Renault'] if semana in pedido else 0 }}
+                        CDR: {{ pedido.get(semana, {}).get('CDR', 0) }}<br>
+                        APRC: {{ pedido.get(semana, {}).get('APRC', 0) }}<br>
+                        Renault: {{ pedido.get(semana, {}).get('Renault', 0) }}
                     </td>
                 {% endfor %}
                 <td class="totals">{{ pedido['Total CDR'] }}</td>
