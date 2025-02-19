@@ -28,10 +28,15 @@ init_db()
 def index():
     with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT numero_parte, nombre_parte, almacen, fecha_vencimiento, ran, SUM(cantidad) FROM pedidos GROUP BY numero_parte, nombre_parte, almacen, fecha_vencimiento, ran")
+        cursor.execute("""
+            SELECT numero_parte, nombre_parte, almacen, fecha_vencimiento, ran, SUM(cantidad) 
+            FROM pedidos 
+            GROUP BY numero_parte, nombre_parte, almacen, fecha_vencimiento, ran
+        """)
         pedidos = cursor.fetchall()
 
     data = {}
+    semanas = set()
 
     for pedido in pedidos:
         numero_parte, nombre_parte, almacen, fecha_vencimiento, ran, cantidad = pedido
@@ -42,20 +47,19 @@ def index():
                 "Nombre de la Parte": nombre_parte,
                 "Total CDR": 0,
                 "Total APRC": 0,
-                "Total Renault": 0,
-                "Pedidos": []
+                "Total Renault": 0
             }
 
-        data[numero_parte]["Pedidos"].append({
-            "almacen": almacen,
-            "fecha_vencimiento": fecha_vencimiento,
-            "ran": ran,
-            "cantidad": cantidad
-        })
+        semana = fecha_vencimiento  # Asumimos que la fecha ya está en formato de semana
+        semanas.add(semana)
 
+        if semana not in data[numero_parte]:
+            data[numero_parte][semana] = {"CDR": 0, "APRC": 0, "Renault": 0}
+
+        data[numero_parte][semana][almacen] += cantidad
         data[numero_parte][f"Total {almacen}"] += cantidad
 
-    return render_template("table.html", header="FASO - Procesador de Pedidos", data=data.values())
+    return render_template("table.html", header="FASO - Procesador de Pedidos", data=data.values(), semanas=sorted(semanas))
 
 @app.route("/upload", methods=["POST"])
 def upload():
@@ -72,17 +76,9 @@ def upload():
         if file.filename == "":
             continue
 
-        try:
-            df = pd.read_excel(file, dtype=str)  # Cargar datos como texto para evitar problemas de conversión
-        except Exception as e:
-            return f"Error al leer el archivo: {str(e)}", 400
-
-        print(f"Columnas detectadas en el archivo {file.filename}:", df.columns.tolist())
-
-        # Convertir nombres de columnas a mayúsculas y eliminar espacios
+        df = pd.read_excel(file, dtype={"LIN03": str})
         df.columns = df.columns.str.strip().str.upper()
 
-        # Definir el mapeo esperado de columnas
         column_mapping = {
             "LIN03": "numero_parte",
             "REF02": "nombre_parte",
@@ -91,32 +87,19 @@ def upload():
             "FST09": "ran"
         }
 
-        # Verificar si todas las columnas necesarias están en el archivo
-        missing_columns = [col for col in column_mapping if col not in df.columns]
-        if missing_columns:
-            return f"Error: Archivo inválido. Faltan las columnas {missing_columns}. Se encontraron {df.columns.tolist()}", 400
-
-        # Renombrar las columnas
         df.rename(columns=column_mapping, inplace=True)
+        expected_columns = set(column_mapping.values())
 
-        # Verificar que los datos no estén vacíos
-        if df.empty:
-            return "Error: El archivo no contiene datos válidos", 400
-
-        # Imprimir algunos valores para depuración
-        print(df.head())
+        if not expected_columns.issubset(df.columns):
+            return f"Error: Archivo inválido. Se esperaban las columnas {expected_columns}, pero se encontraron {df.columns.tolist()}", 400
 
         with sqlite3.connect(DATABASE) as conn:
             cursor = conn.cursor()
             for _, row in df.iterrows():
-                try:
-                    cursor.execute(
-                        "INSERT INTO pedidos (numero_parte, nombre_parte, almacen, fecha_vencimiento, ran, cantidad) VALUES (?, ?, ?, ?, ?, ?)", 
-                        (row["numero_parte"], row["nombre_parte"], almacen, row["fecha_vencimiento"], row["ran"], row["cantidad"])
-                    )
-                except Exception as e:
-                    print(f"Error insertando datos: {row.to_dict()} - {str(e)}")
-
+                cursor.execute("""
+                    INSERT INTO pedidos (numero_parte, nombre_parte, almacen, fecha_vencimiento, ran, cantidad) 
+                    VALUES (?, ?, ?, ?, ?, ?)""",
+                    (row["numero_parte"], row["nombre_parte"], almacen, row["fecha_vencimiento"], row["ran"], row["cantidad"]))
             conn.commit()
 
     return redirect(url_for("index"))
